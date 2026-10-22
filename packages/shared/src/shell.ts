@@ -899,10 +899,15 @@ export const resolveSpawnCommand = Effect.fnUntraced(function* (
   }
 
   // Node runs a shell spawn as `cmd.exe /d /s /c "<command> <args...>"`, but
-  // passing args with `shell: true` prints DEP0190. Build the same escaped line
-  // here and pass no args.
+  // passing args with `shell: true` prints DEP0190, and Node 24 mangles
+  // backslashes in absolute Windows paths (D:\dir becomes D:dir), so a
+  // resolved .cmd path never reaches cmd.exe intact. Build the escaped line
+  // here, pass no args, and keep a bare command name bare: cmd.exe repeats
+  // the same PATH lookup itself, against the same child environment.
   return {
-    command: [resolvedCommand, ...args].map(escapeWindowsShellArg).join(" "),
+    command: [explicitPath ? resolvedCommand : command, ...args]
+      .map(escapeWindowsShellArg)
+      .join(" "),
     args: [],
     shell: true,
   };
