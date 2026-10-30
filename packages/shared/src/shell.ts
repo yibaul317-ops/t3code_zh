@@ -877,9 +877,16 @@ export const resolveSpawnCommand = Effect.fnUntraced(function* (
     return { command: shimExecutable, args: [...args], shell: false };
   }
 
-  // Build the escaped command line without separate args to avoid Node DEP0190 with shell:true.
+  // Node runs a shell spawn as `cmd.exe /d /s /c "<command> <args...>"`, but
+  // passing args with `shell: true` prints DEP0190, and Node 24 mangles
+  // backslashes in absolute Windows paths (D:\dir becomes D:dir), so a
+  // resolved .cmd path never reaches cmd.exe intact. Build the escaped line
+  // here, pass no args, and keep a bare command name bare: cmd.exe repeats
+  // the same PATH lookup itself, against the same child environment.
   return {
-    command: [resolvedCommand, ...args].map(escapeWindowsShellArg).join(" "),
+    command: [explicitPath ? resolvedCommand : command, ...args]
+      .map(escapeWindowsShellArg)
+      .join(" "),
     args: [],
     shell: true,
   };
