@@ -46,8 +46,11 @@ function isExcluded(element: Element | null): boolean {
   while (current !== null) {
     if (EXCLUDED_ANCESTOR_TAGS.has(current.tagName)) return true;
     if (current instanceof HTMLElement && current.isContentEditable) return true;
-    if (current.classList.contains("cm-editor")) return true;
-    if (current.hasAttribute("data-term")) return true;
+    // Terminals render as canvases under data-terminal-owner; diff code carries data-diff.
+    if (current.hasAttribute("data-terminal-owner")) return true;
+    if (current.hasAttribute("data-diff") || current.hasAttribute("data-diffs-header")) {
+      return true;
+    }
     current = current.parentElement;
   }
   return false;
