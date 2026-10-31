@@ -58,6 +58,7 @@ import * as OpenCodeServerLedger from "@t3tools/provider-opencode/server/OpenCod
 import * as ProviderHostLive from "./provider/ProviderHostLive.ts";
 import * as DocumentText from "./provider/DocumentText.ts";
 import * as AcpRegistrySupport from "@t3tools/provider-acp-registry/server/AcpRegistrySupport";
+import * as LocalAcpPresets from "@t3tools/provider-acp-registry/server/LocalAcpPresets";
 import * as CheckpointDiffQuery from "./checkpointing/CheckpointDiffQuery.ts";
 import * as CheckpointStore from "./checkpointing/CheckpointStore.ts";
 import * as SourceControlBuiltInDrivers from "./sourceControl/builtInDrivers.ts";
@@ -653,6 +654,7 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
 const layerRuntimeCoreDependencies = layerRuntimeCoreDependenciesBase.pipe(
   Layer.provideMerge(layerPtyAdapter),
   Layer.provideMerge(AcpRegistrySupport.layerFromHost.pipe(Layer.provide(ProviderHostLive.layer))),
+  Layer.provideMerge(LocalAcpPresets.layer()),
   Layer.provideMerge(
     Layer.mergeAll(
       layerProviderEventLoggers,

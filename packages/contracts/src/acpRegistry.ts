@@ -3,7 +3,7 @@ import * as Schema from "effect/Schema";
 
 import { ProjectId, ThreadId, TrimmedNonEmptyString, TrimmedString } from "./baseSchemas.ts";
 import { ProviderOptionDescriptor } from "./model.ts";
-import { ProviderInstanceId } from "./providerInstance.ts";
+import { ProviderInstanceEnvironmentVariable, ProviderInstanceId } from "./providerInstance.ts";
 
 const AcpRegistryAgentId = TrimmedNonEmptyString.check(
   Schema.isMaxLength(128),
@@ -298,6 +298,38 @@ export const AcpRegistryProbeResult = Schema.Struct({
   ),
 });
 export type AcpRegistryProbeResult = typeof AcpRegistryProbeResult.Type;
+
+export const LocalAcpPresetId = Schema.Literals(["kimi", "dsh", "zcode"]);
+export type LocalAcpPresetId = typeof LocalAcpPresetId.Type;
+
+const LocalAcpPresetPath = TrimmedNonEmptyString.check(Schema.isMaxLength(4_096));
+
+/** Ready-to-persist driver config for a detected local ACP preset. */
+export const LocalAcpPresetConfig = Schema.Struct({
+  source: Schema.Literal("local"),
+  commandPath: LocalAcpPresetPath,
+  commandArgs: Schema.Array(Schema.String.check(Schema.isMaxLength(1_024))).check(
+    Schema.isMaxLength(64),
+  ),
+});
+export type LocalAcpPresetConfig = typeof LocalAcpPresetConfig.Type;
+
+export const LocalAcpPreset = Schema.Struct({
+  id: LocalAcpPresetId,
+  label: TrimmedNonEmptyString.check(Schema.isMaxLength(160)),
+  description: Schema.String.check(Schema.isMaxLength(1_024)),
+  detected: Schema.Boolean,
+  detail: Schema.String.check(Schema.isMaxLength(1_024)),
+  instanceId: ProviderInstanceId,
+  config: Schema.optionalKey(LocalAcpPresetConfig),
+  environment: Schema.Array(ProviderInstanceEnvironmentVariable).check(Schema.isMaxLength(32)),
+});
+export type LocalAcpPreset = typeof LocalAcpPreset.Type;
+
+export const LocalAcpPresetListResult = Schema.Struct({
+  presets: Schema.Array(LocalAcpPreset).check(Schema.isMaxLength(16)),
+});
+export type LocalAcpPresetListResult = typeof LocalAcpPresetListResult.Type;
 
 export const AcpRegistryOperationErrorReason = Schema.Literals([
   "agent_not_configured",

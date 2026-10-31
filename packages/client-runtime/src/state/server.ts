@@ -1321,6 +1321,13 @@ export function createServerEnvironmentAtoms<R, E>(
       // server again, which reuses a Registry index fetched in the last five minutes.
       staleTimeMs: 5 * 60_000,
     }),
+    listLocalAcpPresets: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:acp-registry:local-presets",
+      tag: WS_METHODS.serverListLocalAcpPresets,
+      // Detection spawns short-lived probes; keep reopening the dialog cheap without
+      // pinning a stale "not installed" result for the whole session.
+      staleTimeMs: 60_000,
+    }),
     configProjection,
     welcome,
     legacyThreadMigration: createEnvironmentRpcSubscriptionAtomFamily(runtime, {

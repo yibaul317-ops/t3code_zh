@@ -63,6 +63,7 @@ const RPC_AGGREGATES = {
   [WS_METHODS.peerLinksAnswerRequest]: "peerLinks",
   [WS_METHODS.serverUpdateSettings]: "server",
   [WS_METHODS.serverSearchAcpRegistry]: "server",
+  [WS_METHODS.serverListLocalAcpPresets]: "server",
   [WS_METHODS.serverPrepareAcpRegistryAgent]: "server",
   [WS_METHODS.serverUninstallAcpRegistryManagedBinary]: "server",
   [WS_METHODS.serverAcceptAcpRegistryUrlAuth]: "server",

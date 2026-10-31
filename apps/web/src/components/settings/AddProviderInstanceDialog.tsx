@@ -11,6 +11,7 @@ import {
   ProviderInstanceId,
   ProviderDriverKind,
   type EnvironmentId,
+  type LocalAcpPreset,
   type ProviderInstanceConfig,
   type ProviderInstanceEnvironmentVariable,
 } from "@t3tools/contracts";
@@ -50,6 +51,7 @@ import {
 } from "./AddProviderInstanceDialog.logic";
 import { AddProviderInstanceWizardSteps } from "./AddProviderInstanceWizardSteps";
 import { AcpRegistrySearchStep, useAcpRegistrySearch } from "./AcpRegistrySearchStep";
+import { LocalAcpPresetList, useLocalAcpPresets } from "./LocalAcpPresetList";
 import { ProviderWizardAuthenticationStep } from "./ProviderWizardAuthenticationStep";
 import { resolveOfficialAcpRegistryIconUrl } from "./AcpRegistryIcon";
 import { AddManagedCodexAccountDialog } from "./CodexSetupSection";
@@ -199,6 +201,10 @@ export function AddProviderInstanceDialog({
     !(isAcpRegistry && isManualAcpConfiguration);
   // Searches while Show more is closed, so the fold opens on results.
   const registry = useAcpRegistrySearch(environmentId, showRegistrySearch);
+  const localAcpPresets = useLocalAcpPresets(
+    environmentId,
+    !createdInstanceId && wizardStep === 0 && isAcpRegistry && isManualAcpConfiguration,
+  );
   const isPreparingRegistryAgent = registry.preparingId !== null;
   const defaultIdentity: ProviderIdentityDraft = {
     label: driverOption.label,
@@ -358,6 +364,25 @@ export function AddProviderInstanceDialog({
       }),
     );
     setLocalEnvironment([]);
+    setHasAttemptedSubmit(false);
+  };
+
+  const handleLocalAcpPresetSelected = (preset: LocalAcpPreset) => {
+    if (preset.config === undefined) return;
+    setDriver(ACP_REGISTRY_DRIVER_KIND);
+    setSelectedAcp(null);
+    setIsManualAcpConfiguration(true);
+    setConfigByDriver((existing) => ({
+      ...existing,
+      [ACP_REGISTRY_DRIVER_KIND]: { ...preset.config },
+    }));
+    setLocalEnvironment(preset.environment.map((variable) => ({ ...variable })));
+    setIdentityByDriver((existing) =>
+      updateProviderIdentityDraft(existing, ACP_REGISTRY_DRIVER_KIND, {
+        label: preset.label,
+        instanceIdOverride: preset.instanceId,
+      }),
+    );
     setHasAttemptedSubmit(false);
   };
 
@@ -526,6 +551,15 @@ export function AddProviderInstanceDialog({
                               Search registry
                             </Button>
                           </div>
+                          {isLocalAcp ? (
+                            <LocalAcpPresetList
+                              environmentId={environmentId}
+                              presets={localAcpPresets}
+                              providerInstances={settings.providerInstances ?? {}}
+                              disabled={isPreparingRegistryAgent || isSaving}
+                              onSelect={handleLocalAcpPresetSelected}
+                            />
+                          ) : null}
                           <SettingsGroup variant="plain">
                             <ProviderSettingsForm
                               definition={driverOption}

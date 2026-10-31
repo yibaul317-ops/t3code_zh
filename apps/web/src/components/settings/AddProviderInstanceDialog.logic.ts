@@ -71,6 +71,35 @@ export function isConfiguredAcpRegistryAgent(
   });
 }
 
+// Matches by suggested instance id or by the package entry argument, so a preset instance
+// created under a custom id still shows as added.
+export function isConfiguredLocalAcpPreset(
+  instances: Readonly<Record<string, { readonly driver: string; readonly config?: unknown }>>,
+  preset: {
+    readonly instanceId: string;
+    readonly config?: { readonly commandArgs?: ReadonlyArray<string> } | undefined;
+  },
+): boolean {
+  if (Object.hasOwn(instances, preset.instanceId)) return true;
+  const entryMarker = preset.config?.commandArgs?.[0];
+  if (typeof entryMarker !== "string" || entryMarker.length === 0) return false;
+  return Object.values(instances).some((instance) => {
+    if (
+      instance.driver !== "acpRegistry" ||
+      !instance.config ||
+      typeof instance.config !== "object"
+    ) {
+      return false;
+    }
+    const config = instance.config as Record<string, unknown>;
+    return (
+      config.source === "local" &&
+      Array.isArray(config.commandArgs) &&
+      config.commandArgs[0] === entryMarker
+    );
+  });
+}
+
 export function resolveWizardNavigation(
   currentStep: number,
   requestedStep: number,

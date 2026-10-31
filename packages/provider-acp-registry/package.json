@@ -23,6 +23,10 @@
       "types": "./src/server/AcpRegistrySupport.ts",
       "import": "./src/server/AcpRegistrySupport.ts"
     },
+    "./server/LocalAcpPresets": {
+      "types": "./src/server/LocalAcpPresets.ts",
+      "import": "./src/server/LocalAcpPresets.ts"
+    },
     "./server/AcpRegistryRuntimeCoordinator": {
       "types": "./src/server/AcpRegistryRuntimeCoordinator.ts",
       "import": "./src/server/AcpRegistryRuntimeCoordinator.ts"

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   deriveAvailableInstanceId,
   getProviderIdentityDraft,
+  isConfiguredLocalAcpPreset,
   resolveAcpRegistryWizardNavigation,
   resolveWizardNavigation,
   updateProviderIdentityDraft,
@@ -82,5 +83,63 @@ describe("ACP Registry wizard", () => {
       label: "Gemini CLI",
       instanceIdOverride: "acpRegistry_gemini_cli",
     });
+  });
+});
+
+describe("isConfiguredLocalAcpPreset", () => {
+  const preset = {
+    instanceId: "acpRegistry_kimi",
+    config: {
+      source: "local" as const,
+      commandArgs: ["/npm/node_modules/@moonshot-ai/kimi-code/dist/main.mjs", "acp"],
+    },
+  };
+
+  it("matches the suggested instance id", () => {
+    expect(
+      isConfiguredLocalAcpPreset({ acpRegistry_kimi: { driver: "acpRegistry" } }, preset),
+    ).toBe(true);
+    expect(isConfiguredLocalAcpPreset({}, preset)).toBe(false);
+  });
+
+  it("matches a local instance created under a custom id with the same package entry", () => {
+    expect(
+      isConfiguredLocalAcpPreset(
+        {
+          acpRegistry_custom: {
+            driver: "acpRegistry",
+            config: { source: "local", commandArgs: preset.config.commandArgs },
+          },
+        },
+        preset,
+      ),
+    ).toBe(true);
+  });
+
+  it("ignores registry-sourced instances and other drivers without the preset id", () => {
+    expect(
+      isConfiguredLocalAcpPreset(
+        {
+          acpRegistry_registry_kimi: {
+            driver: "acpRegistry",
+            config: { source: "registry", agentId: "kimi-code" },
+          },
+          kimi_cli: { driver: "claudeAgent" },
+        },
+        preset,
+      ),
+    ).toBe(false);
+  });
+
+  it("still matches by instance id when the preset config is absent", () => {
+    expect(
+      isConfiguredLocalAcpPreset(
+        { acpRegistry_kimi: { driver: "acpRegistry" } },
+        {
+          instanceId: "acpRegistry_kimi",
+        },
+      ),
+    ).toBe(true);
+    expect(isConfiguredLocalAcpPreset({}, { instanceId: "acpRegistry_dsh" })).toBe(false);
   });
 });

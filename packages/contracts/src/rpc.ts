@@ -74,6 +74,7 @@ import {
   AcpRegistrySearchResult,
   AcpRegistrySetProviderInput,
   AcpRegistrySetProviderResult,
+  LocalAcpPresetListResult,
 } from "./acpRegistry.ts";
 import { ExternalLauncherError, LaunchEditorInput } from "./editor.ts";
 import {
@@ -509,6 +510,7 @@ export const WS_METHODS = {
   serverUpdateSettings: "server.updateSettings",
   serverDiscoverSourceControl: "server.discoverSourceControl",
   serverSearchAcpRegistry: "server.searchAcpRegistry",
+  serverListLocalAcpPresets: "server.listLocalAcpPresets",
   serverPrepareAcpRegistryAgent: "server.prepareAcpRegistryAgent",
   serverUninstallAcpRegistryManagedBinary: "server.uninstallAcpRegistryManagedBinary",
   serverAcceptAcpRegistryUrlAuth: "server.acceptAcpRegistryUrlAuth",
@@ -825,6 +827,13 @@ const WsServerSearchAcpRegistryRpc = Rpc.make(WS_METHODS.serverSearchAcpRegistry
   payload: AcpRegistrySearchInput,
   success: AcpRegistrySearchResult,
   error: Schema.Union([AcpRegistryOperationError, EnvironmentAuthorizationError]),
+});
+
+// Read-only local probing; the server authorizes it with AuthOrchestrationReadScope.
+const WsServerListLocalAcpPresetsRpc = Rpc.make(WS_METHODS.serverListLocalAcpPresets, {
+  payload: Schema.Struct({}),
+  success: LocalAcpPresetListResult,
+  error: EnvironmentAuthorizationError,
 });
 
 const WsServerPrepareAcpRegistryAgentRpc = Rpc.make(WS_METHODS.serverPrepareAcpRegistryAgent, {
@@ -1985,6 +1994,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsPeerLinksAnswerRequestRpc,
   WsServerDiscoverSourceControlRpc,
   WsServerSearchAcpRegistryRpc,
+  WsServerListLocalAcpPresetsRpc,
   WsServerPrepareAcpRegistryAgentRpc,
   WsServerUninstallAcpRegistryManagedBinaryRpc,
   WsServerAcceptAcpRegistryUrlAuthRpc,
