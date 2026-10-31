@@ -4,6 +4,7 @@ import { PRIVACY_POLICY_URL } from "../../legalLinks";
 import { CheckIcon } from "lucide-react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useRef, useState } from "react";
+import { useI18n } from "../../i18n/I18nProvider";
 import {
   type DesktopUpdateChannel,
   IDLE_COMPACTION_MODES,
@@ -760,6 +761,37 @@ export function LegacyFeaturesSection() {
   );
 }
 
+function LanguageSettingsRow() {
+  const { locale, setLocale } = useI18n();
+
+  return (
+    <SettingsRow
+      title="Language"
+      description="简体中文 translates visible text at runtime; some strings may stay in English."
+      control={
+        <Select
+          value={locale}
+          onValueChange={(value) => {
+            if (value === "en" || value === "zh-CN") setLocale(value);
+          }}
+        >
+          <SelectTrigger size="sm" className="w-full sm:w-40" aria-label="Language">
+            <SelectValue>{locale === "zh-CN" ? "简体中文" : "English"}</SelectValue>
+          </SelectTrigger>
+          <SelectPopup align="end" alignItemWithTrigger={false}>
+            <SelectItem hideIndicator value="en">
+              English
+            </SelectItem>
+            <SelectItem hideIndicator value="zh-CN">
+              简体中文
+            </SelectItem>
+          </SelectPopup>
+        </Select>
+      }
+    />
+  );
+}
+
 export function GeneralSettingsPanel() {
   const settings = useScopedSettings();
   const updateSettings = useUpdateScopedSettings();
@@ -1008,6 +1040,7 @@ export function GeneralSettingsPanel() {
       </SettingsSection>
 
       <SettingsSection id="display" title="Display">
+        <LanguageSettingsRow />
         <SettingsRow
           {...searchableSetting("time-format")}
           description="System default follows your browser or OS clock preference."
