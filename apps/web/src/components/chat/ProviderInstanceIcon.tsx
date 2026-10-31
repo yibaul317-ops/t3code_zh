@@ -7,7 +7,15 @@ import {
 } from "@t3tools/client-runtime/state/provider-instance-display";
 
 import { ProviderDriverKind } from "@t3tools/contracts";
-import { AntigravityIcon, ClaudeAI, Icon, OpenAI } from "../Icons";
+import {
+  AntigravityIcon,
+  ClaudeAI,
+  DeepSeekIcon,
+  Icon,
+  KimiCodeIcon,
+  OpenAI,
+  ZCodeIcon,
+} from "../Icons";
 
 import { cn } from "~/lib/utils";
 import { providerClients } from "../settings/providerDriverMeta";
@@ -57,6 +65,17 @@ export function resolveProviderInstanceAcpRegistryIconUrl(input: {
   );
 }
 
+const LOCAL_ACP_REGISTRY_ICON_BY_DISPLAY_NAME: Readonly<Record<string, Icon>> = {
+  "kimi code": KimiCodeIcon,
+  "deepseek harness (dsh)": DeepSeekIcon,
+  "deepseek harness": DeepSeekIcon,
+  zcode: ZCodeIcon,
+};
+
+export function localAcpRegistryBrandIconForDisplayName(displayName: string): Icon | null {
+  return LOCAL_ACP_REGISTRY_ICON_BY_DISPLAY_NAME[displayName.trim().toLowerCase()] ?? null;
+}
+
 export const ProviderInstanceIcon = memo(function ProviderInstanceIcon(props: {
   driverKind: ProviderDriverKind;
   displayName: string;
@@ -84,6 +103,9 @@ export const ProviderInstanceIcon = memo(function ProviderInstanceIcon(props: {
   const badgeContent = props.badgeContent ?? "initials";
   const iconClassName = cn(props.size === "compact" && "size-3.5", props.iconClassName);
   const isAcpRegistry = props.driverKind === "acpRegistry";
+  const LocalAcpRegistryBrandIcon = isAcpRegistry
+    ? localAcpRegistryBrandIconForDisplayName(props.displayName)
+    : null;
   const acpRegistryIconUrl = resolveProviderInstanceAcpRegistryIconUrl({
     driverKind: props.driverKind,
     agentId: props.acpRegistryAgentId,
@@ -99,7 +121,9 @@ export const ProviderInstanceIcon = memo(function ProviderInstanceIcon(props: {
       style={accentStyle}
       data-provider-accent-color={accentColor}
     >
-      {isAcpRegistry ? (
+      {LocalAcpRegistryBrandIcon ? (
+        <LocalAcpRegistryBrandIcon className={cn("size-5 shrink-0", iconClassName)} aria-hidden />
+      ) : isAcpRegistry ? (
         <AcpRegistryAgentIcon
           className={cn("size-5 rounded-none bg-transparent", iconClassName)}
           fallbackClassName="size-full"

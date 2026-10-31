@@ -2,6 +2,7 @@ import {
   AuthProvidersManageScope,
   type EnvironmentId,
   type LocalAcpPreset,
+  type LocalAcpPresetId,
   ProviderDriverKind,
   type ProviderInstanceConfig,
 } from "@t3tools/contracts";
@@ -10,8 +11,15 @@ import { serverEnvironment } from "../../state/server";
 import { useEnvironmentScope } from "../../state/session";
 import { Alert, AlertDescription } from "../ui/alert";
 import { Button } from "../ui/button";
+import { type Icon, DeepSeekIcon, KimiCodeIcon, ZCodeIcon } from "../Icons";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
 import { isConfiguredLocalAcpPreset } from "./AddProviderInstanceDialog.logic";
+
+const LOCAL_ACP_PRESET_ICON_BY_ID: Partial<Record<LocalAcpPresetId, Icon>> = {
+  kimi: KimiCodeIcon,
+  dsh: DeepSeekIcon,
+  zcode: ZCodeIcon,
+};
 
 /** Local preset detection for the manual local ACP flow; disabled while the step is hidden. */
 export function useLocalAcpPresets(environmentId: EnvironmentId, enabled: boolean) {
@@ -114,15 +122,20 @@ function LocalAcpPresetRow({
     : preset.detected
       ? "Use preset"
       : "Not detected";
+  const PresetIcon = LOCAL_ACP_PRESET_ICON_BY_ID[preset.id];
   return (
     <article className="min-w-0 px-3 py-2.5">
       <div className="flex min-w-0 items-center justify-between gap-3">
         <div className="flex min-w-0 flex-1 items-center gap-3">
-          <ProviderInstanceIcon
-            driverKind={ProviderDriverKind.make("acpRegistry")}
-            displayName={preset.label}
-            iconClassName="size-6 rounded-md text-muted-foreground"
-          />
+          {PresetIcon ? (
+            <PresetIcon className="size-6 shrink-0" aria-hidden />
+          ) : (
+            <ProviderInstanceIcon
+              driverKind={ProviderDriverKind.make("acpRegistry")}
+              displayName={preset.label}
+              iconClassName="size-6 rounded-md text-muted-foreground"
+            />
+          )}
           <div className="min-w-0 flex-1">
             <h4 className="min-w-0 truncate text-sm font-medium text-foreground">{preset.label}</h4>
             {preset.description ? (
