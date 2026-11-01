@@ -1994,7 +1994,8 @@ function windowsVswherePrerequisiteScript(arch: typeof BuildArch.Type): string {
     arch === "arm64"
       ? ["Microsoft.VisualStudio.Component.VC.Tools.ARM64"]
       : ["Microsoft.VisualStudio.Component.VC.Tools.x86.x64"];
-  const spectreArch = arch === "arm64" ? "arm64" : "x64";
+  // Fork (t3code_zh): the Spectre-mitigated-libs probe is waived — local unsigned
+  // fork builds compile fine without them (they are hardening, not functional).
   return [
     "$vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\\Installer\\vswhere.exe'",
     "if (!(Test-Path $vswhere)) { exit 1 }",
@@ -2004,7 +2005,6 @@ function windowsVswherePrerequisiteScript(arch: typeof BuildArch.Type): string {
     "if (!$kitsRoot -or !(Test-Path (Join-Path $kitsRoot 'Lib'))) { exit 1 }",
     "$msvcToolset = Get-ChildItem (Join-Path $install 'VC\\Tools\\MSVC') -Directory | Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1",
     "if (!$msvcToolset) { exit 1 }",
-    `if (!(Test-Path (Join-Path $msvcToolset.FullName 'lib\\spectre\\${spectreArch}'))) { exit 1 }`,
   ].join("; ");
 }
 
