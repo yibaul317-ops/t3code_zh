@@ -1,3 +1,5 @@
+import type { LocalAcpPresetConfig } from "@t3tools/contracts";
+
 export type WizardNavigation =
   | { readonly kind: "navigate"; readonly step: number }
   | { readonly kind: "blocked"; readonly step: number; readonly error: string };
@@ -77,11 +79,11 @@ export function isConfiguredLocalAcpPreset(
   instances: Readonly<Record<string, { readonly driver: string; readonly config?: unknown }>>,
   preset: {
     readonly instanceId: string;
-    readonly config?: { readonly commandArgs?: ReadonlyArray<string> } | undefined;
+    readonly config?: LocalAcpPresetConfig | undefined;
   },
 ): boolean {
   if (Object.hasOwn(instances, preset.instanceId)) return true;
-  const entryMarker = preset.config?.commandArgs?.[0];
+  const entryMarker = preset.config?.source === "local" ? preset.config.commandArgs[0] : undefined;
   if (typeof entryMarker !== "string" || entryMarker.length === 0) return false;
   return Object.values(instances).some((instance) => {
     if (

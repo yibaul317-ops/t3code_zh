@@ -56,7 +56,7 @@ export function LocalAcpPresetList({
             Local agent presets
           </h3>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            Detects supported agents installed on this environment and fills in the launch command.
+            One-click setups for officially supported agents on this environment.
           </p>
         </div>
         <Button

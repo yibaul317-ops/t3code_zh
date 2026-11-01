@@ -1,5 +1,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
+import * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
+import * as TestProviderHost from "@t3tools/provider-testing/TestProviderHost";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -24,8 +26,8 @@ interface SpawnCall {
   readonly args: ReadonlyArray<string>;
 }
 
-const testPlatform = process.platform as NodeJS.Platform;
-const isWindowsHost = process.platform === "win32";
+const testPlatform = HostProcess.Platform.defaultValue();
+const isWindowsHost = testPlatform === "win32";
 const executableName = (platform: NodeJS.Platform, base: string) =>
   platform === "win32" && !/\.(exe|cmd|bat|com)$/iu.test(base) ? `${base}.exe` : base;
 
@@ -91,11 +93,20 @@ function makeDependencies(options: {
       scriptSpawner(options.calls, options.script),
     ),
     Layer.succeed(HostProcess.Platform, options.platform ?? testPlatform),
-    Layer.succeed(HostProcess.Architecture, process.arch),
+    Layer.succeed(HostProcess.Architecture, HostProcess.Architecture.defaultValue()),
     Layer.succeed(HostProcess.Environment, options.environment),
     Layer.succeed(HostProcess.HomeDirectory, options.homeDirectory),
   );
 }
+
+type TestDependencies = ReturnType<typeof makeDependencies>;
+
+const testContext = (dependencies: TestDependencies) =>
+  Layer.mergeAll(
+    NodeServices.layer,
+    TestProviderHost.layer().pipe(Layer.provide(NodeServices.layer)),
+    dependencies,
+  );
 
 const detectPresets = (options?: LocalAcpPresets.LocalAcpPresetsOptions) =>
   Effect.gen(function* () {
@@ -121,52 +132,79 @@ const nodeVersionScript =
     return matched === undefined ? undefined : { stdout: `${matched.version}\n` };
   };
 
+const writeRegistryCache = (agents: ReadonlyArray<unknown>) =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const host = yield* ProviderHost.ProviderHost;
+    const registryDirectory = path.join(host.paths.providerStatusCacheDir, "acp-registry");
+    yield* fileSystem.makeDirectory(registryDirectory, { recursive: true });
+    yield* fileSystem.writeFileString(
+      path.join(registryDirectory, "registry.json"),
+      JSON.stringify({ version: "1.0.0", agents }),
+    );
+  });
+
 const PRESET_IDS = ["kimi", "dsh", "zcode"] as const;
 
 describe("LocalAcpPresets", () => {
-  it.effect("detects Kimi Code from npm root -g and caches the npm root", () =>
+  it.effect("detects Kimi Code as a registry preset from the cached registry index", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const root = yield* fileSystem.makeTempDirectoryScoped({
         prefix: "t3-presets-",
       });
-      const binDirectory = path.join(root, "bin");
-      const npmRoot = path.join(root, "global-node_modules");
-      const nodePath = path.join(binDirectory, executableName(testPlatform, "node"));
-      yield* makeExecutable(nodePath);
-      yield* makeExecutable(path.join(binDirectory, executableName(testPlatform, "npm")));
-      yield* makePackageEntry(npmRoot, "@moonshot-ai/kimi-code", "dist/main.mjs");
       const calls: Array<SpawnCall> = [];
-      const presets = yield* detectPresets().pipe(
-        Effect.provide(
-          Layer.mergeAll(
-            NodeServices.layer,
-            makeDependencies({
-              calls,
-              homeDirectory: path.join(root, "home"),
-              environment: { PATH: binDirectory },
-              script: npmRootScript(npmRoot),
-            }),
-          ),
-        ),
-      );
+      const dependencies = makeDependencies({
+        calls,
+        homeDirectory: path.join(root, "home"),
+        environment: { PATH: path.join(root, "empty-bin") },
+        script: () => undefined,
+      });
+      const presets = yield* Effect.gen(function* () {
+        yield* writeRegistryCache([{ id: "kimi", name: "Kimi CLI", version: "1.2.3" }]);
+        return yield* detectPresets();
+      }).pipe(Effect.provide(testContext(dependencies)));
 
       const kimi = presets.presets.find((preset) => preset.id === "kimi");
       expect(kimi).toMatchObject({
         detected: true,
         instanceId: "acpRegistry_kimi",
         environment: [],
-        config: {
-          source: "local",
-          commandArgs: [path.join(npmRoot, "@moonshot-ai", "kimi-code", "dist", "main.mjs"), "acp"],
-        },
+        config: { source: "registry", agentId: "kimi", distribution: "auto" },
       });
-      expect(kimi?.config?.commandPath.toLowerCase()).toBe(nodePath.toLowerCase());
+      expect(kimi?.detail).toContain("v1.2.3");
+      expect(kimi?.detail).toContain("ACP Registry");
+      // The registry preset never probes the local machine.
+      expect(calls).toHaveLength(0);
       expect(presets.presets.map((preset) => preset.id)).toEqual(PRESET_IDS);
       expect(presets.presets.find((preset) => preset.id === "dsh")?.detected).toBe(false);
       expect(presets.presets.find((preset) => preset.id === "zcode")?.detected).toBe(false);
-      expect(calls.filter((call) => call.args[0] === "root")).toHaveLength(1);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("keeps Kimi Code addable when the cached registry index has no kimi entry", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-presets-",
+      });
+      const dependencies = makeDependencies({
+        calls: [],
+        homeDirectory: path.join(root, "home"),
+        environment: { PATH: path.join(root, "empty-bin") },
+        script: () => undefined,
+      });
+      const presets = yield* detectPresets().pipe(Effect.provide(testContext(dependencies)));
+
+      const kimi = presets.presets.find((preset) => preset.id === "kimi");
+      expect(kimi).toMatchObject({
+        detected: true,
+        config: { source: "registry", agentId: "kimi", distribution: "auto" },
+      });
+      expect(kimi?.detail).toContain("on first use");
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
@@ -182,24 +220,18 @@ describe("LocalAcpPresets", () => {
       yield* makeExecutable(path.join(binDirectory, executableName(testPlatform, "node")));
       yield* makeExecutable(path.join(binDirectory, executableName(testPlatform, "npm")));
       yield* makePackageEntry(npmRoot, "@deepseek-ai/dsh", "lib/bin.js");
-      const presets = yield* detectPresets().pipe(
-        Effect.provide(
-          Layer.mergeAll(
-            NodeServices.layer,
-            makeDependencies({
-              calls: [],
-              homeDirectory: path.join(root, "home"),
-              environment: { PATH: binDirectory },
-              script: (command, args) =>
-                npmRootScript(npmRoot)(command, args) ??
-                nodeVersionScript([{ match: /node(24)?(\.(exe|cmd))?$/iu, version: "v22.12.0" }])(
-                  command,
-                  args,
-                ),
-            }),
+      const dependencies = makeDependencies({
+        calls: [],
+        homeDirectory: path.join(root, "home"),
+        environment: { PATH: binDirectory },
+        script: (command, args) =>
+          npmRootScript(npmRoot)(command, args) ??
+          nodeVersionScript([{ match: /node(24)?(\.(exe|cmd))?$/iu, version: "v22.12.0" }])(
+            command,
+            args,
           ),
-        ),
-      );
+      });
+      const presets = yield* detectPresets().pipe(Effect.provide(testContext(dependencies)));
 
       const dsh = presets.presets.find((preset) => preset.id === "dsh");
       expect(dsh?.detected).toBe(false);
@@ -209,7 +241,7 @@ describe("LocalAcpPresets", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
-  it.effect("detects DSH with a Node.js 24 toolchain from ~/.local", () =>
+  it.effect("detects DSH with a Node.js 24 toolchain from ~/.local and caches the npm root", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
@@ -226,24 +258,19 @@ describe("LocalAcpPresets", () => {
       yield* makeExecutable(path.join(binDirectory, executableName(testPlatform, "npm")));
       yield* makeExecutable(node24Path);
       yield* makePackageEntry(npmRoot, "@deepseek-ai/dsh", "lib/bin.js");
-      const presets = yield* detectPresets().pipe(
-        Effect.provide(
-          Layer.mergeAll(
-            NodeServices.layer,
-            makeDependencies({
-              calls: [],
-              homeDirectory,
-              environment: { PATH: binDirectory },
-              script: (command, args) =>
-                npmRootScript(npmRoot)(command, args) ??
-                nodeVersionScript([
-                  { match: /node-v24/iu, version: "v24.5.0" },
-                  { match: /node(24)?(\.(exe|cmd))?$/iu, version: "v22.12.0" },
-                ])(command, args),
-            }),
-          ),
-        ),
-      );
+      const calls: Array<SpawnCall> = [];
+      const dependencies = makeDependencies({
+        calls,
+        homeDirectory,
+        environment: { PATH: binDirectory },
+        script: (command, args) =>
+          npmRootScript(npmRoot)(command, args) ??
+          nodeVersionScript([
+            { match: /node-v24/iu, version: "v24.5.0" },
+            { match: /node(24)?(\.(exe|cmd))?$/iu, version: "v22.12.0" },
+          ])(command, args),
+      });
+      const presets = yield* detectPresets().pipe(Effect.provide(testContext(dependencies)));
 
       const dsh = presets.presets.find((preset) => preset.id === "dsh");
       expect(dsh).toMatchObject({
@@ -258,6 +285,7 @@ describe("LocalAcpPresets", () => {
           ],
         },
       });
+      expect(calls.filter((call) => call.args[0] === "root")).toHaveLength(1);
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
@@ -277,27 +305,23 @@ describe("LocalAcpPresets", () => {
         );
       }
       const calls: Array<SpawnCall> = [];
-      const presets = yield* detectPresets().pipe(
-        Effect.provide(
-          Layer.mergeAll(
-            NodeServices.layer,
-            makeDependencies({
-              calls,
-              homeDirectory: path.join(root, "home"),
-              environment:
-                testPlatform === "win32"
-                  ? {
-                      PATH: emptyBin,
-                      APPDATA: path.join(root, "AppData", "Roaming"),
-                    }
-                  : { PATH: emptyBin },
-              script: () => undefined,
-            }),
-          ),
-        ),
-      );
+      const dependencies = makeDependencies({
+        calls,
+        homeDirectory: path.join(root, "home"),
+        environment:
+          testPlatform === "win32"
+            ? {
+                PATH: emptyBin,
+                APPDATA: path.join(root, "AppData", "Roaming"),
+              }
+            : { PATH: emptyBin },
+        script: () => undefined,
+      });
+      const presets = yield* detectPresets().pipe(Effect.provide(testContext(dependencies)));
 
-      for (const preset of presets.presets) {
+      // The registry preset stays addable without a local npm install.
+      expect(presets.presets.find((preset) => preset.id === "kimi")?.detected).toBe(true);
+      for (const preset of presets.presets.filter((entry) => entry.id !== "kimi")) {
         expect(preset.detected).toBe(false);
         expect(preset.detail).toMatch(/not installed|npm global root/);
       }
@@ -328,21 +352,17 @@ describe("LocalAcpPresets", () => {
       yield* makeExecutable(path.join(binDirectory, executableName(testPlatform, "npm")));
       yield* makePackageEntry(npmRoot, "zcode-acp-server", "dist/index.js");
       yield* makeExecutable(zcodeBin);
+      const dependencies = makeDependencies({
+        calls: [],
+        homeDirectory: path.join(root, "home"),
+        environment: {
+          PATH: binDirectory,
+          LOCALAPPDATA: path.join(root, "local-appdata"),
+        },
+        script: npmRootScript(npmRoot),
+      });
       const presets = yield* detectPresets({ zcodeInstallRoots: [] }).pipe(
-        Effect.provide(
-          Layer.mergeAll(
-            NodeServices.layer,
-            makeDependencies({
-              calls: [],
-              homeDirectory: path.join(root, "home"),
-              environment: {
-                PATH: binDirectory,
-                LOCALAPPDATA: path.join(root, "local-appdata"),
-              },
-              script: npmRootScript(npmRoot),
-            }),
-          ),
-        ),
+        Effect.provide(testContext(dependencies)),
       );
 
       const zcode = presets.presets.find((preset) => preset.id === "zcode");
@@ -354,8 +374,9 @@ describe("LocalAcpPresets", () => {
           commandArgs: [path.join(npmRoot, "zcode-acp-server", "dist", "index.js")],
         },
       });
-      expect(zcode?.config?.commandPath.toLowerCase()).toBe(nodePath.toLowerCase());
-      expect(zcode?.environment).toEqual([
+      if (zcode?.config?.source !== "local") throw new Error("expected a local zcode config");
+      expect(zcode.config.commandPath.toLowerCase()).toBe(nodePath.toLowerCase());
+      expect(zcode.environment).toEqual([
         {
           name: "ZCODE_ACP_SHOW_COMPLETION_STATUS",
           value: "0",
@@ -369,7 +390,7 @@ describe("LocalAcpPresets", () => {
         { name: "ZCODE_MODEL", value: "GLM-5.3", sensitive: false },
         {
           name: "ZCODE_NODE",
-          value: zcode?.config?.commandPath,
+          value: zcode.config.commandPath,
           sensitive: false,
         },
         { name: "ZCODE_BIN", value: zcodeBin, sensitive: false },
@@ -392,20 +413,14 @@ describe("LocalAcpPresets", () => {
       yield* makeExecutable(path.join(binDirectory, executableName(testPlatform, "npm")));
       yield* makePackageEntry(npmRoot, "zcode-acp-server", "dist/index.js");
       yield* makeExecutable(zcodeBin);
-      const presets = yield* detectPresets({
-        zcodeInstallRoots: [installRoot],
-      }).pipe(
-        Effect.provide(
-          Layer.mergeAll(
-            NodeServices.layer,
-            makeDependencies({
-              calls: [],
-              homeDirectory: path.join(root, "home"),
-              environment: { PATH: binDirectory },
-              script: npmRootScript(npmRoot),
-            }),
-          ),
-        ),
+      const dependencies = makeDependencies({
+        calls: [],
+        homeDirectory: path.join(root, "home"),
+        environment: { PATH: binDirectory },
+        script: npmRootScript(npmRoot),
+      });
+      const presets = yield* detectPresets({ zcodeInstallRoots: [installRoot] }).pipe(
+        Effect.provide(testContext(dependencies)),
       );
 
       const zcode = presets.presets.find((preset) => preset.id === "zcode");
@@ -430,18 +445,14 @@ describe("LocalAcpPresets", () => {
       yield* makeExecutable(path.join(binDirectory, executableName(testPlatform, "node")));
       yield* makeExecutable(path.join(binDirectory, executableName(testPlatform, "npm")));
       yield* makePackageEntry(npmRoot, "zcode-acp-server", "dist/index.js");
+      const dependencies = makeDependencies({
+        calls: [],
+        homeDirectory: path.join(root, "home"),
+        environment: { PATH: binDirectory },
+        script: npmRootScript(npmRoot),
+      });
       const presets = yield* detectPresets({ zcodeInstallRoots: [] }).pipe(
-        Effect.provide(
-          Layer.mergeAll(
-            NodeServices.layer,
-            makeDependencies({
-              calls: [],
-              homeDirectory: path.join(root, "home"),
-              environment: { PATH: binDirectory },
-              script: npmRootScript(npmRoot),
-            }),
-          ),
-        ),
+        Effect.provide(testContext(dependencies)),
       );
 
       const zcode = presets.presets.find((preset) => preset.id === "zcode");
@@ -451,7 +462,7 @@ describe("LocalAcpPresets", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
-  it.effect("reports when Node.js is missing from PATH entirely", () =>
+  it.effect("reports local presets undetected when Node.js is missing from PATH", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
@@ -462,28 +473,24 @@ describe("LocalAcpPresets", () => {
       yield* fileSystem.makeDirectory(emptyBin, { recursive: true });
       const npmRoot = path.join(root, "global-node_modules");
       yield* makeExecutable(path.join(emptyBin, executableName(testPlatform, "npm")));
-      yield* makePackageEntry(npmRoot, "@moonshot-ai/kimi-code", "dist/main.mjs");
-      const presets = yield* detectPresets().pipe(
-        Effect.provide(
-          Layer.mergeAll(
-            NodeServices.layer,
-            makeDependencies({
-              calls: [],
-              homeDirectory: path.join(root, "home"),
-              environment: { PATH: emptyBin },
-              script: npmRootScript(npmRoot),
-            }),
-          ),
-        ),
-      );
+      yield* makePackageEntry(npmRoot, "zcode-acp-server", "dist/index.js");
+      const dependencies = makeDependencies({
+        calls: [],
+        homeDirectory: path.join(root, "home"),
+        environment: { PATH: emptyBin },
+        script: npmRootScript(npmRoot),
+      });
+      const presets = yield* detectPresets().pipe(Effect.provide(testContext(dependencies)));
 
-      const kimi = presets.presets.find((preset) => preset.id === "kimi");
-      expect(kimi?.detected).toBe(false);
-      expect(kimi?.detail).toContain("Node.js was not found");
+      const zcode = presets.presets.find((preset) => preset.id === "zcode");
+      expect(zcode?.detected).toBe(false);
+      expect(zcode?.detail).toContain("Node.js was not found");
+      // The registry preset does not depend on a local Node.js runtime.
+      expect(presets.presets.find((preset) => preset.id === "kimi")?.detected).toBe(true);
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
-  it.effect("reports an undetected preset when the npm global root cannot be located", () =>
+  it.effect("reports an undetected local preset when the npm global root cannot be located", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
@@ -494,24 +501,19 @@ describe("LocalAcpPresets", () => {
       yield* fileSystem.makeDirectory(emptyBin, { recursive: true });
       const environment: NodeJS.ProcessEnv = { PATH: emptyBin };
       if (testPlatform === "win32") environment.APPDATA = path.join(root, "missing-appdata");
-      const presets = yield* detectPresets().pipe(
-        Effect.provide(
-          Layer.mergeAll(
-            NodeServices.layer,
-            makeDependencies({
-              calls: [],
-              homeDirectory: path.join(root, "home"),
-              environment,
-              script: () => undefined,
-            }),
-          ),
-        ),
-      );
+      const dependencies = makeDependencies({
+        calls: [],
+        homeDirectory: path.join(root, "home"),
+        environment,
+        script: () => undefined,
+      });
+      const presets = yield* detectPresets().pipe(Effect.provide(testContext(dependencies)));
 
-      for (const preset of presets.presets) {
+      for (const preset of presets.presets.filter((entry) => entry.id !== "kimi")) {
         expect(preset.detected).toBe(false);
         expect(preset.detail).toContain("npm global root");
       }
+      expect(presets.presets.find((preset) => preset.id === "kimi")?.detected).toBe(true);
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 });

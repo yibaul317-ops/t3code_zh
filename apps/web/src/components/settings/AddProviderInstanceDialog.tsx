@@ -369,9 +369,10 @@ export function AddProviderInstanceDialog({
 
   const handleLocalAcpPresetSelected = (preset: LocalAcpPreset) => {
     if (preset.config === undefined) return;
+    const presetIsLocal = preset.config.source === "local";
     setDriver(ACP_REGISTRY_DRIVER_KIND);
     setSelectedAcp(null);
-    setIsManualAcpConfiguration(true);
+    setIsManualAcpConfiguration(presetIsLocal);
     setConfigByDriver((existing) => ({
       ...existing,
       [ACP_REGISTRY_DRIVER_KIND]: { ...preset.config },
@@ -384,30 +385,70 @@ export function AddProviderInstanceDialog({
       }),
     );
     setHasAttemptedSubmit(false);
+    if (presetIsLocal) return;
+    // Registry presets have nothing to review: create the instance and go straight to
+    // the registry sign-in step.
+    void handleSave({
+      config: { ...preset.config },
+      label: preset.label,
+      instanceId: preset.instanceId,
+      environment: preset.environment,
+    });
   };
 
-  const handleSave = async () => {
+  const handleSave = async (presetDraft?: {
+    readonly config: Record<string, unknown>;
+    readonly label: string;
+    readonly instanceId: string;
+    readonly environment: ReadonlyArray<ProviderInstanceEnvironmentVariable>;
+  }) => {
     if (!readEnvironmentScope(environmentId, AuthProvidersManageScope)) return;
     if (isSaving || createdInstanceId) return;
-    setHasAttemptedSubmit(true);
-    if (instanceIdError !== null || (isAcpRegistry && acpSelectionError !== null)) return;
+    const draftSource = presetDraft === undefined ? undefined : presetDraft.config.source;
+    const draftInstanceIdError =
+      presetDraft === undefined ? null : validateInstanceId(presetDraft.instanceId, existingIds);
+    if (presetDraft === undefined) setHasAttemptedSubmit(true);
+    if (
+      (presetDraft === undefined && instanceIdError !== null) ||
+      draftInstanceIdError !== null ||
+      (presetDraft === undefined && isAcpRegistry && acpSelectionError !== null)
+    ) {
+      return;
+    }
 
     const config =
-      driver === "codex"
+      presetDraft?.config ??
+      (driver === "codex"
         ? { ...configByDriver[driver], setupMode: "existing" }
-        : (configByDriver[driver] ?? {});
+        : (configByDriver[driver] ?? {}));
     const hasConfig = Object.keys(config).length > 0;
-    const normalizedAccentColor = normalizeProviderAccentColor(accentColor);
+    const effectiveLabel = presetDraft?.label ?? label;
+    const effectiveInstanceId = presetDraft?.instanceId ?? instanceId;
+    const effectiveDriver = presetDraft === undefined ? driver : ACP_REGISTRY_DRIVER_KIND;
+    const registryFlow =
+      presetDraft === undefined ? isAcpRegistry && !isLocalAcp : draftSource !== "local";
+    const isLocalSource = draftSource === "local";
+    const environment =
+      presetDraft === undefined
+        ? isLocalAcp && localEnvironment.length > 0
+          ? localEnvironment
+          : undefined
+        : isLocalSource && presetDraft.environment.length > 0
+          ? presetDraft.environment
+          : undefined;
+    const normalizedAccentColor = normalizeProviderAccentColor(
+      presetDraft === undefined ? accentColor : "",
+    );
 
     const nextInstance: ProviderInstanceConfig = {
-      driver,
+      driver: effectiveDriver,
       enabled: true,
-      ...(label.trim().length > 0 ? { displayName: label.trim() } : {}),
+      ...(effectiveLabel.trim().length > 0 ? { displayName: effectiveLabel.trim() } : {}),
       ...(normalizedAccentColor ? { accentColor: normalizedAccentColor } : {}),
       ...(hasConfig ? { config } : {}),
-      ...(isLocalAcp && localEnvironment.length > 0 ? { environment: localEnvironment } : {}),
+      ...(environment !== undefined && environment.length > 0 ? { environment } : {}),
     };
-    const brandedId = ProviderInstanceId.make(instanceId);
+    const brandedId = ProviderInstanceId.make(effectiveInstanceId);
     setIsSaving(true);
     const result = await persistProviderInstance({
       operation: "create",
@@ -425,7 +466,7 @@ export function AddProviderInstanceDialog({
       return;
     }
     onCreated?.(brandedId);
-    if (isAcpRegistry && !isLocalAcp) {
+    if (registryFlow) {
       setCreatedInstanceId(brandedId);
       setIsSaving(false);
       setWizardStep(2);
@@ -434,7 +475,7 @@ export function AddProviderInstanceDialog({
     toastManager.add({
       type: "success",
       title: "Provider instance added",
-      description: `${driverOption.label} instance '${instanceId}' was added.`,
+      description: `${driverOption.label} instance '${effectiveInstanceId}' was added.`,
     });
     onOpenChange(false);
   };

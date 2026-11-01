@@ -303,15 +303,23 @@ export const LocalAcpPresetId = Schema.Literals(["kimi", "dsh", "zcode"]);
 export type LocalAcpPresetId = typeof LocalAcpPresetId.Type;
 
 const LocalAcpPresetPath = TrimmedNonEmptyString.check(Schema.isMaxLength(4_096));
+const LocalAcpPresetAgentId = TrimmedNonEmptyString.check(Schema.isMaxLength(256));
 
-/** Ready-to-persist driver config for a detected local ACP preset. */
-export const LocalAcpPresetConfig = Schema.Struct({
-  source: Schema.Literal("local"),
-  commandPath: LocalAcpPresetPath,
-  commandArgs: Schema.Array(Schema.String.check(Schema.isMaxLength(1_024))).check(
-    Schema.isMaxLength(64),
-  ),
-});
+/** Ready-to-persist driver config for a detected ACP preset. */
+export const LocalAcpPresetConfig = Schema.Union([
+  Schema.Struct({
+    source: Schema.Literal("local"),
+    commandPath: LocalAcpPresetPath,
+    commandArgs: Schema.Array(Schema.String.check(Schema.isMaxLength(1_024))).check(
+      Schema.isMaxLength(64),
+    ),
+  }),
+  Schema.Struct({
+    source: Schema.Literal("registry"),
+    agentId: LocalAcpPresetAgentId,
+    distribution: Schema.Literals(["auto", "binary", "npx", "uvx"]),
+  }),
+]);
 export type LocalAcpPresetConfig = typeof LocalAcpPresetConfig.Type;
 
 export const LocalAcpPreset = Schema.Struct({

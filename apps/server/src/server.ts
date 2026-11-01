@@ -656,7 +656,7 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
 const layerRuntimeCoreDependencies = layerRuntimeCoreDependenciesBase.pipe(
   Layer.provideMerge(layerPtyAdapter),
   Layer.provideMerge(AcpRegistrySupport.layerFromHost.pipe(Layer.provide(ProviderHostLive.layer))),
-  Layer.provideMerge(LocalAcpPresets.layer()),
+  Layer.provideMerge(LocalAcpPresets.layer().pipe(Layer.provide(ProviderHostLive.layer))),
   Layer.provideMerge(
     Layer.mergeAll(
       layerProviderEventLoggers,

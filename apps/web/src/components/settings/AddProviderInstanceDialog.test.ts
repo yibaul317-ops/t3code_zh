@@ -91,6 +91,7 @@ describe("isConfiguredLocalAcpPreset", () => {
     instanceId: "acpRegistry_kimi",
     config: {
       source: "local" as const,
+      commandPath: "/npm/node_modules/.bin/node",
       commandArgs: ["/npm/node_modules/@moonshot-ai/kimi-code/dist/main.mjs", "acp"],
     },
   };
@@ -141,5 +142,16 @@ describe("isConfiguredLocalAcpPreset", () => {
       ),
     ).toBe(true);
     expect(isConfiguredLocalAcpPreset({}, { instanceId: "acpRegistry_dsh" })).toBe(false);
+  });
+
+  it("matches a registry-sourced preset by its suggested instance id", () => {
+    const registryPreset = {
+      instanceId: "acpRegistry_kimi",
+      config: { source: "registry" as const, agentId: "kimi", distribution: "auto" as const },
+    };
+    expect(
+      isConfiguredLocalAcpPreset({ acpRegistry_kimi: { driver: "acpRegistry" } }, registryPreset),
+    ).toBe(true);
+    expect(isConfiguredLocalAcpPreset({}, registryPreset)).toBe(false);
   });
 });

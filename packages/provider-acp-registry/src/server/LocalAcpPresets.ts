@@ -6,6 +6,7 @@ import {
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { resolveSpawnCommand, SpawnExecutableResolution } from "@t3tools/shared/shell";
 import { collectUint8StreamText } from "@t3tools/provider-core/server/collectStreamText";
+import * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -28,11 +29,15 @@ interface LocalAcpPresetEnvironmentVariable {
   readonly sensitive: boolean;
 }
 
-interface LocalAcpPresetDefinition {
+interface LocalAcpPresetDefinitionBase {
   readonly id: LocalAcpPresetId;
   readonly label: string;
   readonly description: string;
   readonly instanceId: string;
+}
+
+interface LocalPackageAcpPresetDefinition extends LocalAcpPresetDefinitionBase {
+  readonly kind: "localPackage";
   readonly packageName: string;
   readonly entry: string;
   readonly minimumNodeMajor: number;
@@ -43,22 +48,29 @@ interface LocalAcpPresetDefinition {
   }) => Effect.Effect<ReadonlyArray<LocalAcpPresetEnvironmentVariable>, never>;
 }
 
-const KIMI_PRESET: LocalAcpPresetDefinition = {
+interface RegistryAcpPresetDefinition extends LocalAcpPresetDefinitionBase {
+  readonly kind: "registry";
+  readonly agentId: string;
+}
+
+type LocalAcpPresetDefinition = LocalPackageAcpPresetDefinition | RegistryAcpPresetDefinition;
+
+const KIMI_PRESET: RegistryAcpPresetDefinition = {
+  kind: "registry",
   id: "kimi",
   label: "Kimi Code",
-  description: "Moonshot AI's Kimi Code agent, launched from the global npm install.",
+  description:
+    "Moonshot AI's Kimi CLI. T3 downloads the official build from the ACP Registry and keeps it updated.",
   instanceId: "acpRegistry_kimi",
-  packageName: "@moonshot-ai/kimi-code",
-  entry: "dist/main.mjs",
-  minimumNodeMajor: 0,
-  commandArgs: (entryPath) => [entryPath, "acp"],
-  environment: () => Effect.succeed([]),
+  agentId: "kimi",
 };
 
-const DSH_PRESET: LocalAcpPresetDefinition = {
+const DSH_PRESET: LocalPackageAcpPresetDefinition = {
+  kind: "localPackage",
   id: "dsh",
   label: "DeepSeek Harness (DSH)",
-  description: "DeepSeek's DSH agent with its ACP profile. Requires Node.js 24 or newer.",
+  description:
+    "DeepSeek's DSH agent running its official ACP profile (dsh --profile acp). Requires Node.js 24 or newer.",
   instanceId: "acpRegistry_dsh",
   packageName: "@deepseek-ai/dsh",
   entry: "lib/bin.js",
@@ -93,6 +105,15 @@ function parseNodeMajorVersion(output: string): number | undefined {
   return match === null ? undefined : Number(match[1]);
 }
 
+const CachedRegistryIndex = Schema.Struct({
+  agents: Schema.Array(
+    Schema.Struct({ id: Schema.String, version: Schema.optional(Schema.String) }),
+  ),
+});
+const decodeCachedRegistryIndex = Schema.decodeUnknownOption(CachedRegistryIndex);
+const decodeJsonText = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown));
+const decodePresetListResult = Schema.decodeEffect(LocalAcpPresetListResult);
+
 export class LocalAcpPresets extends Context.Service<
   LocalAcpPresets,
   {
@@ -115,7 +136,10 @@ const makeLocalAcpPresets = Effect.fn("LocalAcpPresets.make")(function* (
 ): Effect.fn.Return<
   LocalAcpPresets["Service"],
   never,
-  ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | Path.Path
+  | ChildProcessSpawner.ChildProcessSpawner
+  | FileSystem.FileSystem
+  | Path.Path
+  | ProviderHost.ProviderHost
 > {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -124,14 +148,20 @@ const makeLocalAcpPresets = Effect.fn("LocalAcpPresets.make")(function* (
   const homeDirectory = yield* HostProcess.HomeDirectory;
   const hostEnvironment = yield* HostProcess.Environment;
   const resolveExecutable = yield* SpawnExecutableResolution;
+  const { paths: hostPaths } = yield* ProviderHost.ProviderHost;
+  const registryCachePath = path.join(
+    hostPaths.providerStatusCacheDir,
+    "acp-registry",
+    "registry.json",
+  );
 
-  const runCommandText = (
+  const runCommandText = Effect.fn("LocalAcpPresets.runCommandText")(function* (
     command: string,
     args: ReadonlyArray<string>,
     environment: NodeJS.ProcessEnv,
     timeout: Duration.Input,
-  ) =>
-    Effect.gen(function* () {
+  ): Effect.fn.Return<Option.Option<string>, never> {
+    const collect = Effect.gen(function* () {
       const resolved = yield* resolveSpawnCommand(command, args, {
         env: environment,
       });
@@ -160,14 +190,15 @@ const makeLocalAcpPresets = Effect.fn("LocalAcpPresets.make")(function* (
         return Option.none<string>();
       }
       return Option.some(stdout.text);
-    }).pipe(
-      Effect.scoped,
+    }).pipe(Effect.scoped);
+    return yield* collect.pipe(
       Effect.timeoutOrElse({
         duration: timeout,
         orElse: () => Effect.succeed(Option.none<string>()),
       }),
       Effect.orElseSucceed(() => Option.none<string>()),
     );
+  });
 
   const probeZcodeBin = Effect.fn("LocalAcpPresets.probeZcodeBin")(function* (
     environment: NodeJS.ProcessEnv,
@@ -203,10 +234,12 @@ const makeLocalAcpPresets = Effect.fn("LocalAcpPresets.make")(function* (
     return undefined;
   });
 
-  const ZCODE_PRESET: LocalAcpPresetDefinition = {
+  const ZCODE_PRESET: LocalPackageAcpPresetDefinition = {
+    kind: "localPackage",
     id: "zcode",
     label: "ZCode",
-    description: "ZCode's GLM coding agent through the zcode-acp-server ACP bridge.",
+    description:
+      "ZCode's GLM coding agent through the zcode-acp-server bridge, which reuses your ZCode desktop sign-in and refreshes it automatically (no API key to manage).",
     instanceId: "acpRegistry_zcode",
     packageName: "zcode-acp-server",
     entry: "dist/index.js",
@@ -222,7 +255,24 @@ const makeLocalAcpPresets = Effect.fn("LocalAcpPresets.make")(function* (
       ]),
   };
 
-  const localAcpPresets = [KIMI_PRESET, DSH_PRESET, ZCODE_PRESET] as const;
+  const localAcpPresets: ReadonlyArray<LocalAcpPresetDefinition> = [
+    KIMI_PRESET,
+    DSH_PRESET,
+    ZCODE_PRESET,
+  ];
+
+  const registryAgentVersion = Effect.fn("LocalAcpPresets.registryAgentVersion")(function* (
+    agentId: string,
+  ): Effect.fn.Return<string | undefined, never> {
+    const json = yield* fileSystem.readFileString(registryCachePath).pipe(
+      Effect.flatMap((text) => decodeJsonText(text)),
+      Effect.orElseSucceed((): null => null),
+    );
+    if (json === null) return undefined;
+    const decoded = decodeCachedRegistryIndex(json);
+    if (Option.isNone(decoded)) return undefined;
+    return decoded.value.agents.find((agent) => agent.id === agentId)?.version;
+  });
 
   const npmRootFallbackCandidates = (environment: NodeJS.ProcessEnv): ReadonlyArray<string> => {
     if (platform === "win32") {
@@ -328,26 +378,31 @@ const makeLocalAcpPresets = Effect.fn("LocalAcpPresets.make")(function* (
       : { status: "too_old", found: `v${best.major}` };
   });
 
-  const detectPreset = Effect.fn("LocalAcpPresets.detectPreset")(function* (
-    definition: LocalAcpPresetDefinition,
+  interface ProbedLocalAcpPreset {
+    readonly id: LocalAcpPresetId;
+    readonly label: string;
+    readonly description: string;
+    readonly detected: boolean;
+    readonly detail: string;
+    readonly instanceId: string;
+    readonly config?:
+      | {
+          readonly source: "local";
+          readonly commandPath: string;
+          readonly commandArgs: Array<string>;
+        }
+      | {
+          readonly source: "registry";
+          readonly agentId: string;
+          readonly distribution: "auto" | "binary" | "npx" | "uvx";
+        };
+    readonly environment: ReadonlyArray<LocalAcpPresetEnvironmentVariable>;
+  }
+
+  const detectLocalPackagePreset = Effect.fn("LocalAcpPresets.detectLocalPackagePreset")(function* (
+    definition: LocalPackageAcpPresetDefinition,
     environment: NodeJS.ProcessEnv,
-  ): Effect.fn.Return<
-    {
-      readonly id: LocalAcpPresetId;
-      readonly label: string;
-      readonly description: string;
-      readonly detected: boolean;
-      readonly detail: string;
-      readonly instanceId: string;
-      readonly config?: {
-        readonly source: "local";
-        readonly commandPath: string;
-        readonly commandArgs: Array<string>;
-      };
-      readonly environment: ReadonlyArray<LocalAcpPresetEnvironmentVariable>;
-    },
-    never
-  > {
+  ): Effect.fn.Return<ProbedLocalAcpPreset, never> {
     const base = {
       id: definition.id,
       label: definition.label,
@@ -422,16 +477,41 @@ const makeLocalAcpPresets = Effect.fn("LocalAcpPresets.make")(function* (
     };
   });
 
+  const detectRegistryPreset = Effect.fn("LocalAcpPresets.detectRegistryPreset")(function* (
+    definition: RegistryAcpPresetDefinition,
+  ): Effect.fn.Return<ProbedLocalAcpPreset, never> {
+    const cachedVersion = yield* registryAgentVersion(definition.agentId);
+    return {
+      id: definition.id,
+      label: definition.label,
+      description: definition.description,
+      instanceId: definition.instanceId,
+      // The registry search path is online-capable, so the card stays addable even
+      // before the cached index mentions the agent.
+      detected: true,
+      detail:
+        cachedVersion === undefined
+          ? `T3 downloads ${definition.label} from the official ACP Registry on first use and keeps it updated.`
+          : `Official ACP Registry entry found (v${cachedVersion}). T3 downloads ${definition.label} and keeps it updated automatically.`,
+      config: {
+        source: "registry",
+        agentId: definition.agentId,
+        distribution: "auto",
+      },
+      environment: [],
+    };
+  });
+
   const detect = Effect.fn("LocalAcpPresets.detect")(function* (
     environment?: NodeJS.ProcessEnv,
   ): Effect.fn.Return<LocalAcpPresetListResultType, never> {
     const effectiveEnvironment = environment ?? hostEnvironment;
     const probed = yield* Effect.forEach(localAcpPresets, (definition) =>
-      detectPreset(definition, effectiveEnvironment),
+      definition.kind === "registry"
+        ? detectRegistryPreset(definition)
+        : detectLocalPackagePreset(definition, effectiveEnvironment),
     );
-    return yield* Schema.decodeEffect(LocalAcpPresetListResult)({
-      presets: probed,
-    }).pipe(Effect.orDie);
+    return yield* decodePresetListResult({ presets: probed }).pipe(Effect.orDie);
   });
 
   return LocalAcpPresets.of({ detect });
@@ -442,5 +522,8 @@ export const layer = (
 ): Layer.Layer<
   LocalAcpPresets,
   never,
-  ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | Path.Path
+  | ChildProcessSpawner.ChildProcessSpawner
+  | FileSystem.FileSystem
+  | Path.Path
+  | ProviderHost.ProviderHost
 > => Layer.effect(LocalAcpPresets, makeLocalAcpPresets(options));
